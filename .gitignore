@@ -1,0 +1,7 @@
+.cache/
+.idea/
+data/
+bin/
+tmp/
+*.exe
+.env
