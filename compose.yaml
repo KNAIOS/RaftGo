@@ -1,0 +1,60 @@
+name: raftkv
+x-node: &node
+  image: raftkv:local
+  build: .
+  restart: unless-stopped
+  stop_grace_period: 20s
+  user: "65532:65532"
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  mem_limit: 512m
+  cpus: 1.0
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+  networks: [raft]
+  healthcheck:
+    test: ["CMD", "/raftkv", "healthcheck"]
+    interval: 10s
+    timeout: 3s
+    retries: 3
+    start_period: 10s
+x-env: &env
+  HTTP_ADDR: ":8080"
+  RAFT_ADDR: ":7000"
+  DATA_DIR: /data
+  API_TOKEN: "${API_TOKEN:-}"
+  PEERS: '[{"id":"node1","raft":"node1:7000","api":"http://127.0.0.1:18081"},{"id":"node2","raft":"node2:7000","api":"http://127.0.0.1:18082"},{"id":"node3","raft":"node3:7000","api":"http://127.0.0.1:18083"}]'
+services:
+  node1:
+    <<: *node
+    environment:
+      <<: *env
+      NODE_ID: node1
+      RAFT_ADVERTISE: node1:7000
+      BOOTSTRAP: "true"
+    ports: ["127.0.0.1:18081:8080"]
+    volumes: ["./data/node1:/data"]
+  node2:
+    <<: *node
+    environment:
+      <<: *env
+      NODE_ID: node2
+      RAFT_ADVERTISE: node2:7000
+      BOOTSTRAP: "false"
+    ports: ["127.0.0.1:18082:8080"]
+    volumes: ["./data/node2:/data"]
+  node3:
+    <<: *node
+    environment:
+      <<: *env
+      NODE_ID: node3
+      RAFT_ADVERTISE: node3:7000
+      BOOTSTRAP: "false"
+    ports: ["127.0.0.1:18083:8080"]
+    volumes: ["./data/node3:/data"]
+networks:
+  raft: {}

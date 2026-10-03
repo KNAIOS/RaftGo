@@ -1,0 +1,9 @@
+.cache
+.git
+.idea
+data
+bin
+tmp
+*.exe
+.env
+docs/verification.md

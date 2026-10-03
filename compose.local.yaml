@@ -1,0 +1,13 @@
+services:
+  node1:
+    build:
+      context: .
+      dockerfile: Dockerfile.local
+  node2:
+    build:
+      context: .
+      dockerfile: Dockerfile.local
+  node3:
+    build:
+      context: .
+      dockerfile: Dockerfile.local
