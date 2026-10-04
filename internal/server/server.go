@@ -8,12 +8,18 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/hashicorp/raft"
 	raftboltdb "github.com/hashicorp/raft-boltdb/v2"
+	kvv1 "go_prj/api/kv/v1"
 	"go_prj/internal/store"
+	"google.golang.org/genproto/googleapis/rpc/errdetails"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync/atomic"
 	"time"
 )
 
@@ -23,9 +29,9 @@ type Peer struct {
 	API  string `json:"api"`
 }
 type Config struct {
-	ID, HTTPAddr, RaftAddr, Advertise, DataDir, Token string
-	Bootstrap                                         bool
-	Peers                                             []Peer
+	ID, HTTPAddr, GRPCAddr, RaftAddr, Advertise, DataDir, Token string
+	Bootstrap                                                   bool
+	Peers                                                       []Peer
 }
 
 func env(key, fallback string) string {
@@ -35,7 +41,7 @@ func env(key, fallback string) string {
 	return fallback
 }
 func FromEnv() (Config, error) {
-	cfg := Config{ID: env("NODE_ID", "node1"), HTTPAddr: env("HTTP_ADDR", ":8080"), RaftAddr: env("RAFT_ADDR", ":7000"), Advertise: env("RAFT_ADVERTISE", "127.0.0.1:7000"), DataDir: env("DATA_DIR", "data/node1"), Token: os.Getenv("API_TOKEN")}
+	cfg := Config{ID: env("NODE_ID", "node1"), HTTPAddr: env("HTTP_ADDR", ":8080"), GRPCAddr: env("GRPC_ADDR", "127.0.0.1:9090"), RaftAddr: env("RAFT_ADDR", ":7000"), Advertise: env("RAFT_ADVERTISE", "127.0.0.1:7000"), DataDir: env("DATA_DIR", "data/node1"), Token: os.Getenv("API_TOKEN")}
 	var err error
 	cfg.Bootstrap, err = strconv.ParseBool(env("BOOTSTRAP", "false"))
 	if err != nil {
@@ -69,11 +75,16 @@ func FromEnv() (Config, error) {
 }
 
 type Node struct {
-	cfg       Config
-	raft      *raft.Raft
-	transport *raft.NetworkTransport
-	db        *raftboltdb.BoltStore
-	pending   chan struct{}
+	cfg          Config
+	raft         *raft.Raft
+	transport    *raft.NetworkTransport
+	db           *raftboltdb.BoltStore
+	pending      chan struct{}
+	grpcServer   *grpc.Server
+	grpcConn     *grpc.ClientConn
+	rpcClient    kvv1.KVServiceClient
+	grpcEndpoint string
+	rpcCalls     uint64
 }
 
 func Open(cfg Config) (*Node, error) {
@@ -123,9 +134,26 @@ func Open(cfg Config) (*Node, error) {
 			return nil, err
 		}
 	}
+	if err := n.startRPC(); err != nil {
+		_ = n.Close()
+		return nil, err
+	}
 	return n, nil
 }
 func (n *Node) Close() error {
+	if n.grpcConn != nil {
+		_ = n.grpcConn.Close()
+	}
+	if n.grpcServer != nil {
+		done := make(chan struct{})
+		go func() { n.grpcServer.GracefulStop(); close(done) }()
+		select {
+		case <-done:
+		case <-time.After(7 * time.Second):
+			n.grpcServer.Stop()
+			<-done
+		}
+	}
 	err := n.raft.Shutdown().Error()
 	_ = n.transport.Close()
 	dbErr := n.db.Close()
@@ -152,49 +180,65 @@ func (n *Node) raftError(c *gin.Context, err error) {
 	c.JSON(code, gin.H{"error": "raft_unavailable", "detail": err.Error(), "leader_id": id, "leader_api": api, "outcome": "unknown; retry writes with the same client_id and sequence"})
 }
 func (n *Node) execute(c *gin.Context, cmd store.Command) {
-	if n.raft.State() != raft.Leader {
-		n.raftError(c, raft.ErrNotLeader)
-		return
-	}
-	data, err := json.Marshal(cmd)
-	if err != nil {
-		c.JSON(400, gin.H{"error": "invalid_request"})
-		return
-	}
-	select {
-	case n.pending <- struct{}{}:
+	ctx, cancel := n.gatewayContext(c.Request.Context())
+	defer cancel()
+	var response *kvv1.Result
+	var err error
+	request := &kvv1.MutationRequest{Key: cmd.Key, Value: cmd.Value, ClientId: cmd.ClientID, Sequence: cmd.Sequence, Expected: cmd.Expected, ExpectedExists: cmd.ExpectedExists}
+	switch cmd.Op {
+	case "get":
+		response, err = n.rpcClient.Get(ctx, &kvv1.GetRequest{Key: cmd.Key})
+	case "put":
+		response, err = n.rpcClient.Put(ctx, request)
+	case "delete":
+		response, err = n.rpcClient.Delete(ctx, request)
+	case "cas":
+		response, err = n.rpcClient.CompareAndSwap(ctx, request)
 	default:
-		c.JSON(429, gin.H{"error": "too_many_pending_requests"})
-		return
-	}
-	future := n.raft.Apply(data, 5*time.Second)
-	completed := make(chan error, 1)
-	go func() { err := future.Error(); <-n.pending; completed <- err }()
-	select {
-	case err = <-completed:
-	case <-time.After(6 * time.Second):
-		n.raftError(c, fmt.Errorf("application deadline exceeded"))
-		return
-	case <-c.Request.Context().Done():
+		c.JSON(400, gin.H{"error": "invalid_operation"})
 		return
 	}
 	if err != nil {
-		n.raftError(c, err)
-		return
-	}
-	result, ok := future.Response().(store.Result)
-	if !ok {
-		c.JSON(500, gin.H{"error": "invalid_result"})
-		return
-	}
-	code := 200
-	if result.Error != "" {
-		code = 409
-		if result.Error == "session_limit" {
-			code = 429
+		problem := status.Convert(err)
+		reason := "raft_unavailable"
+		id, api := n.leader()
+		for _, detail := range problem.Details() {
+			if info, ok := detail.(*errdetails.ErrorInfo); ok {
+				reason = info.Reason
+				id = info.Metadata["leader_id"]
+				api = info.Metadata["leader_api"]
+			}
 		}
+		code := 503
+		switch problem.Code() {
+		case codes.InvalidArgument:
+			code = 400
+			reason = "invalid_key_value_or_session"
+		case codes.Unauthenticated:
+			code = 401
+			reason = "unauthorized"
+		case codes.AlreadyExists:
+			code = 409
+		case codes.FailedPrecondition:
+			code = 409
+		case codes.ResourceExhausted:
+			code = 429
+			if reason == "store_full" {
+				code = 409
+			}
+			if reason == "TOO_MANY_PENDING_REQUESTS" {
+				reason = "too_many_pending_requests"
+			}
+		case codes.Internal:
+			code = 500
+		}
+		if reason == "NOT_LEADER" || reason == "RAFT_UNAVAILABLE" || reason == "APPLICATION_TIMEOUT" || reason == "REQUEST_CANCELED" {
+			reason = "raft_unavailable"
+		}
+		c.JSON(code, gin.H{"error": reason, "detail": problem.Message(), "leader_id": id, "leader_api": api, "outcome": "unknown; retry writes with unchanged client_id and sequence"})
+		return
 	}
-	c.JSON(code, result)
+	c.JSON(200, store.Result{Value: response.Value, Exists: response.Exists, Applied: response.Applied, Error: response.Error})
 }
 func (n *Node) Router() http.Handler {
 	gin.SetMode(gin.ReleaseMode)
@@ -218,7 +262,7 @@ func (n *Node) Router() http.Handler {
 	})
 	r.GET("/v1/status", func(c *gin.Context) {
 		id, api := n.leader()
-		c.JSON(200, gin.H{"node_id": n.cfg.ID, "state": n.raft.State().String(), "leader_id": id, "leader_api": api, "stats": n.raft.Stats()})
+		c.JSON(200, gin.H{"node_id": n.cfg.ID, "state": n.raft.State().String(), "leader_id": id, "leader_api": api, "stats": n.raft.Stats(), "grpc_endpoint": n.grpcEndpoint, "grpc_calls": atomic.LoadUint64(&n.rpcCalls)})
 	})
 	r.GET("/v1/kv/:key", func(c *gin.Context) {
 		key := c.Param("key")

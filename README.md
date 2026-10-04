@@ -2,15 +2,18 @@
 
 ����ɵı������Ժ�ʵ�����ܼ� [��֤����](docs/verification.md)��
 
-����һ�������еķֲ�ʽ�洢�����Ŀ��Gin �ṩ HTTP API��HashiCorp Raft �ṩѡ�١����ơ��ύ�����յ��ȣ���Ŀʵ�� KV ״̬����CAS������ȥ�ء�ǿһ�¶����ָ����ͻ��˼�������֤��
+���� gRPC/Protobuf ��·�Ĳ��Ժ�ʵ�����ܼ� [RPC ������֤����](docs/verification-grpc.md)��
 
-�ͻ���ͨ�� HTTP ���ʷ��񣬽ڵ�֮��ͨ�� HashiCorp Raft ���� TCP RPC Э����ϵͳ����д����ͳһ���򵽸�����־�У��ڶ�����ȷ�Ϻ�ִ��״̬�����ṩһ�µ� KV ���������
+����һ�������еķֲ�ʽ�洢�����Ŀ��Gin �ṩ HTTP ���أ�gRPC + Protobuf �ṩ�ڲ� KV ��������������л�Э�飬HashiCorp Raft �ṩѡ�١����ơ��ύ�����յ��ȣ���Ŀʵ�� KV ״̬����CAS������ȥ�ء�ǿһ�¶����ָ����ͻ��˼�������֤��
+
+HTTP �ͻ���ͨ�� Gin ���ط��ʷ���Gin ͨ����ʵ TCP gRPC ���ӵ���ͬ�ڵ�� KV ��ˣ�Go RPC �ͻ���Ҳ��ֱ�ӵ��ø÷��񡣽ڵ�֮��ͨ�� HashiCorp Raft ���� TCP RPC Э����ϵͳ����д����ͳһ���򵽸�����־�У��ڶ�����ȷ�Ϻ�ִ��״̬�����ṩһ�µ� KV ���������
 
 ## ��Ŀ����
 
 | ���� | ��� |
 |---|---|
 | ��˽ӿ� | Gin ·�ɡ�JSON У�顢�쳣�ָ�����ѡ Bearer Token |
+| �ڲ� RPC | Protobuf ���� KV �������� Go �ͻ��˺ͷ���˴��룬gRPC ���� |
 | ��ʶ���ݴ� | ���ڵ� Raft��������Ϊ 2������ 1 ���ڵ㲻���� |
 | ���ݲ��� | Get / Put / Delete / CAS�����ֲ��������ֵ |
 | �������� | �ͻ��� ID���������������ժҪ������������Ӧ |
@@ -25,7 +28,9 @@
 flowchart TB
     Client["�ͻ��ˣ�curl / kvctl / kvbench"] --> API["Gin HTTP API"]
     API --> Validate["��Ȩ������У�顢����׼��"]
-    Validate --> Role{"��ǰ�ڵ�Ϊ Leader��"}
+    Validate --> RPC["gRPC KV ����Protobuf / HTTP2"]
+    Direct["Go RPC �ͻ��ˣ�kvgrpc"] --> RPC
+    RPC --> Role{"��ǰ�ڵ�Ϊ Leader��"}
     Role -->|��| Hint["409������ Leader ��Ϣ"]
     Hint -. "�ͻ�����ѯ����" .-> Client
     Role -->|��| Apply["Raft.Apply���ύ����"]
@@ -45,6 +50,94 @@ flowchart TB
 ```
 
 ͼ�������󵽴� Leader Ϊ����·����Follower �����ڷ�����Զ�ת������`kvctl` ������ Leader ��Ӧ����ѯ�����еĽڵ㣬ʹ����ͬд�����������ԡ�ÿ�����������Լ�����־��״̬��������Ŀ¼��ͼ�е���־�Ϳ����Ǹ��ڵ�����������Դ��
+
+## �ڲ� RPC �� Protobuf Э��
+
+ÿ���ڵ�������������Gin ���� HTTP 8080��gRPC ���� 9090��Gin ���õ����� gRPC ����� `ClientConn`��ͨ�����ɵ� `KVServiceClient` ���� KV ��ˡ����غͺ��Ŀǰ��ͬһ���̣�������ʵ�ʾ��� TCP��HTTP/2��Protobuf ������ gRPC ����˴�����
+
+```mermaid
+sequenceDiagram
+    participant H as HTTP �ͻ���
+    participant G as Gin ����
+    participant P as ���ɵ� gRPC �ͻ���
+    participant R as gRPC KV ����
+    participant F as Raft / KV ״̬��
+    H->>G: HTTP JSON ����
+    G->>P: ���ͻ����� + context
+    P->>R: Protobuf ��������Ϣ / HTTP2 / metadata
+    Note over R: Unary Interceptor ��Ȩ���쳣�ָ�
+    R->>F: JSON Command ���� Raft ��־
+    F-->>R: �ύ��Ӧ�ú�Ľ��
+    R-->>P: Protobuf Result �� gRPC Status
+    P-->>G: ���ͻ���� / ��������
+    G-->>H: JSON ��Ӧ / HTTP ״̬��
+```
+
+### Э��߽�
+
+| �߽� | Э������� | ��; |
+|---|---|---|
+| HTTP �ͻ��˵� Gin | HTTP + JSON | �������curl ����ͨҵ��ͻ��� |
+| Gin / Go RPC �ͻ��˵� KV ��� | gRPC + HTTP/2 + Protobuf | ���ͻ���Լ�����������л���deadline ��ȡ������ |
+| Raft �ڵ�֮�� | HashiCorp TCP RPC + MessagePack | RequestVote��AppendEntries��InstallSnapshot �ȹ�ʶͨ�� |
+| Ӧ��������״̬���� | JSON | �̶�������롢����������־�Ϳ��� |
+
+���ӵ��� KV ����� gRPC�����滻 HashiCorp Raft Transport�����ı����� JSON ��־��ʽ�����нڵ����ݿ��Լ����ָ���Raft �ڵ��ͨ������ HashiCorp ���ô��为��
+
+������Լ�� [kv.proto](api/kv/v1/kv.proto)��
+
+```protobuf
+service KVService {
+  rpc Get(GetRequest) returns (Result);
+  rpc Put(MutationRequest) returns (Result);
+  rpc Delete(MutationRequest) returns (Result);
+  rpc CompareAndSwap(MutationRequest) returns (Result);
+}
+```
+
+`MutationRequest` ���� key��value��client_id��uint64 sequence��expected �� expected_exists��`Result` ���� value��exists��applied �� error���ֶα����Э���һ���֣��ݽ�ʱ���ܸ���ɾ���ֶεı�š�����������չ���ͬһ��״̬�������ͬ���ݺ����ݵ�ԭ������Կ����ȥ�ء�
+
+### ���󡢼�Ȩ�볬ʱ
+
+| ���� | gRPC ״̬ | HTTP ����ӳ�� |
+|---|---|---|
+| ������Ч | InvalidArgument | 400 |
+| Token ��ƥ�� | Unauthenticated | 401 |
+| �� Leader / ʧȥ�쵼Ȩ | FailedPrecondition + NOT_LEADER | 409 |
+| ͬ��Ų�ͬ���� | AlreadyExists + sequence_conflict | 409 |
+| ����� | FailedPrecondition + stale_sequence | 409 |
+| �Ự���� / �������������� | ResourceExhausted | 429 |
+| KV �������� | ResourceExhausted + store_full | 409 |
+| Raft ������ / ��ʱ | Unavailable / DeadlineExceeded | 503 |
+
+CAS ������ƥ���Է������� Result��`applied:false`������ͨ�� Protobuf `google.rpc.ErrorInfo` Я��ԭ��Leader ��Ϣ��������ʾ��HTTP �� gRPC ʹ����ͬ `API_TOKEN`��RPC �����У�� authorization metadata��ֱ�ӵ��ò����ƹ���Ȩ���ֶγ������ơ�
+
+Gin ʹ�� 7 �� RPC deadline����˵ȴ� Raft ������ 6 �룬Raft ��� timeout Ϊ 5 �롣context ȡ�������ȴ��������ܳ������ύ�����ȷ��д��Ӧ����ԭ�������������ԡ���������� 128 ����δ��ɵ��᰸��gRPC ����Ϣ���� 1 MiB����ǰ HTTP �� gRPC ��δ���� TLS�������˿ڽ����������ػ���ַ��
+
+### ֱ�ӵ�������������
+
+���� gRPC �ͻ��ˣ�
+
+```powershell
+& 'D:\go_sdk\go1.27.1\bin\go.exe' build -tags nomsgpack -o bin/kvgrpc.exe ./cmd/kvgrpc
+.\bin\kvgrpc.exe -client rpc-demo -seq 1 -value hello put rpc-key
+.\bin\kvgrpc.exe get rpc-key
+.\bin\kvgrpc.exe -client rpc-demo -seq 2 -expected hello -value world cas rpc-key
+.\bin\kvgrpc.exe -client rpc-demo -seq 2 -expected hello -value world cas rpc-key
+.\bin\kvgrpc.exe -client rpc-demo -seq 3 delete rpc-key
+```
+
+Ĭ����ѯ `127.0.0.1:19091`��`19092`��`19093`��ʹ�� `-nodes` ָ��������ַ��`API_TOKEN` �� `-token` �ṩ��Ȩ���� Leader�����Ӳ����á���ʱ�������ԣ����ݳ�ͻ���Ȩʧ�ܲ���äĿ���ԡ�״̬�ӿڵ� `grpc_calls` ͳ��ͨ����Ȩ�ĵ��ã�������ȷ�� Gin ���󾭹� RPC��
+
+�����ļ�����Դ���ṩ��������������Ҫ��װ protoc���޸�Э���ʹ�� protoc 32.1��protoc-gen-go v1.36.9 �� protoc-gen-go-grpc v1.5.1��
+
+```powershell
+.\scripts\generate-proto.ps1
+# ����������λ��ʱ���� -Protoc �� -PluginDir
+```
+
+�������߱����� `.cache/tools/`�����޸�ϵͳ PATH�����ύ���߶����ơ���Ҫ�ֹ��޸� `kv.pb.go` �� `kv_grpc.pb.go`��
+
 
 ## Raft ѡ�٣���Ⱥ��β��� Leader
 
@@ -88,17 +181,19 @@ sequenceDiagram
 
 ## ��־���ƣ�һ��д�������õ�ȷ��
 
-�ͻ��˵�д���󲻻�ֱ���޸ı��� Map��Gin ������ת��Ϊ `Command`��Leader ������Ϊ��־�᰸���ƣ��ύ����ڵ㰴��ͬ˳��ִ��״̬����
+�ͻ��˵�д���󲻻�ֱ���޸ı��� Map��Gin ������ת��Ϊ Protobuf ��Ϣ���� gRPC ��ˣ����ת��Ϊ `Command`��Leader ������Ϊ��־�᰸���ƣ��ύ����ڵ㰴��ͬ˳��ִ��״̬����
 
 ```mermaid
 sequenceDiagram
     participant C as �ͻ���
-    participant G as Gin / Leader
+    participant G as Gin HTTP ����
+    participant R as gRPC KV ����
     participant L as Leader Raft
     participant F as Follower
     participant S as Leader KV ״̬��
     C->>G: PUT /v1/kv/config + client_id / sequence
-    G->>L: Raft.Apply(JSON Command)
+    G->>R: Protobuf MutationRequest / HTTP2
+    R->>L: Raft.Apply(JSON Command)
     L->>L: �־û�����־��index��term��command
     L->>F: AppendEntries��ǰ׺����/���ڡ�����־���ύλ��
     F->>F: У����־ǰ׺���־û�
@@ -107,7 +202,8 @@ sequenceDiagram
     L->>L: �ƽ� commitIndex
     L->>S: FSM.Apply��ȥ�ؼ���ִ������
     S-->>L: ���� Result
-    L-->>G: ApplyFuture ���
+    L-->>R: ApplyFuture ���
+    R-->>G: Protobuf Result
     G-->>C: HTTP 200 + �������
     L->>F: ���� AppendEntries �������ύλ��
     F->>F: ���ύ˳��Ӧ�ñ���״̬��
@@ -211,15 +307,17 @@ flowchart TB
 
 Leader ʧȥ��������ϵ���ܼ���ȷ��������������Ӧ��ʱ�������˻� Follower�����������ڵ��������ѡ����ֻ��һ����ͨ�Žڵ�ʱ����д�ӿڶ��޷��ɹ�ȷ�Ϲ�ʶ�����ʱ����������ύ����Ӧδ�ʹ�ͻ���Ӧ����ԭ�������ԣ������ǻ�һ������������ظ�ҵ�������
 
-ѡ�١����ơ�ǰ׺У��Ϳ��մ����� HashiCorp Raft �ṩ��Gin ·�ɡ�KV ״̬�����ỰЭ��Ͳ������ý���Щ������ϳɿ��Է��ʵĺ�˷������������ӦԴ�������з�ʽ��
+ѡ�١����ơ�ǰ׺У��Ϳ��մ����� HashiCorp Raft �ṩ��Gin ���ء�gRPC ��ˡ�KV ״̬�����ỰЭ��Ͳ������ý���Щ������ϳɿ��Է��ʵĺ�˷������������ӦԴ�������з�ʽ��
 
 ## Դ��ṹ
 
 ```text
 main.go                    ������ڡ�������顢�����˳�
-internal/server/           ���á�Raft �������ڡ�Gin ·�����Ȩ
+internal/server/           Raft �������ڡ�Gin ���ء�gRPC ������Ȩ
+api/kv/v1/                 Protobuf Э�鼰���ɵ���Ϣ�ͷ������
 internal/store/            KV/CAS ״̬�����Ựȥ�ء�������ָ�
-cmd/kvctl/                 ֧�ֽڵ���ѯ��ʧ�����Ե� Go �ͻ���
+cmd/kvctl/                 ֧�ֽڵ���ѯ��ʧ�����Ե� HTTP �ͻ���
+cmd/kvgrpc/                ʹ�����ɴ���� gRPC �ͻ���
 cmd/kvbench/               �̶����������Ĳ���ѹ�⹤��
 scripts/verify.py          Docker ���ϼ�����֤
 scripts/start.ps1          Windows �����ű�
@@ -232,7 +330,8 @@ KV ״̬�����ڴ���ִ�С��־û��� Raft ��־��b
 | �Ķ���� | �ؼ����� | ��Ӧ���� |
 |---|---|---|
 | [���񼯳�](internal/server/server.go) | `FromEnv` / `Open` | У�����ݡ�����־����մ洢����ʼ����Ⱥ |
-| [�ӿڴ���](internal/server/server.go) | `Router` / `execute` | Gin У�顢Leader ��顢����׼�롢�ȴ� ApplyFuture |
+| [�ӿڴ���](internal/server/server.go) | `Router` / `execute` | Gin У�顢���� gRPC Client��HTTP ����ӳ�� |
+| [RPC ���](internal/server/rpc.go) | `startRPC` / `applyRPC` | RPC ��Ȩ��У�顢Raft �ύ������ Protobuf ��� |
 | [KV ״̬��](internal/store/fsm.go) | `Apply` | ��ȡ��CAS��ȥ�ء��������㼰д�� |
 | [״̬����](internal/store/fsm.go) | `Snapshot` / `Restore` | ����״̬�������־û���ָ� |
 | [�ͻ���](cmd/kvctl/main.go) | `main` | �ڵ���ѯ��ʧ�����ԡ�����ԭд�������� |
@@ -262,13 +361,15 @@ KV ״̬�����ڴ���ִ�С��־û��� Raft ��־��b
 
 �״���֤ʱ Docker Hub �����������س�ʱ����˱�׼����·����δ�ڱ�����֤�����ع���ģʽ����֤������Ҫ�޸Ĵ����� Docker ȫ�����á�
 
-| �ڵ� | ���� API | ������ Raft ��ַ | Windows ����Ŀ¼ |
-|---|---|---|---|
-| node1 | http://127.0.0.1:18081 | node1:7000 | D:\go_prj\data\node1 |
-| node2 | http://127.0.0.1:18082 | node2:7000 | D:\go_prj\data\node2 |
-| node3 | http://127.0.0.1:18083 | node3:7000 | D:\go_prj\data\node3 |
+| �ڵ� | ���� HTTP API | ���� gRPC | ������ Raft ��ַ | Windows ����Ŀ¼ |
+|---|---|---|---|---|
+| node1 | http://127.0.0.1:18081 | 127.0.0.1:19091 | node1:7000 | D:\go_prj\data\node1 |
+| node2 | http://127.0.0.1:18082 | 127.0.0.1:19092 | node2:7000 | D:\go_prj\data\node2 |
+| node3 | http://127.0.0.1:18083 | 127.0.0.1:19093 | node3:7000 | D:\go_prj\data\node3 |
 
-���� API ֻ�󶨱����ػ���ַ��Raft �˿ڲ�������������������������Ϊ 1 CPU��512 MiB �ڴ棬�� root��ֻ�����ļ�ϵͳ���� `/data` ��д������Ӧ����־��ౣ�� 3 �� 10 MB �ļ���Docker ����洢�빹�������� Docker Desktop �� D �̴��̾��������
+���� HTTP �˿ں����� gRPC �˿�ֻ�󶨱����ػ���ַ��Raft �˿ڲ�������������������������Ϊ 1 CPU��512 MiB �ڴ棬�� root��ֻ�����ļ�ϵͳ���� `/data` ��д������Ӧ����־��ౣ�� 3 �� 10 MB �ļ���Docker ����洢�빹�������� Docker Desktop �� D �̴��̾��������
+
+��Ŀ����ʹ�� `172.30.83.0/24`�������ڵ�̶�Ϊ `.11`��`.12`��`.13`����������ֹͣ���������������Ӻ�Ľڵ��ַ�ȶ��������ѽ����� Raft ������ IP ���ö����ӵ���һ���ڵ㡣���������뱾�����������ͻ��Ӧͬʱ���� Compose �������ڵ��ַ�ͼ��ɲ��Ե�ַ�����ɾɰ涯̬��������ʱ��ִ�� `docker compose down`�������������ű��ؽ����磻����������Ŀ¼������
 
 node1 ��������û���κ� Raft ״̬ʱ��ʼ���������ڵ����ã�node2��node3 ���ظ���ʼ�����״�������Ҫ�����ڵ����߲���ѡ�� Leader���������м�Ⱥ��������������
 
@@ -377,7 +478,7 @@ python scripts/verify.py
 
 Python ��֤��ʹ�ñ�׼�⣬ֱ��ִ�� Docker CLI�����Ի���ʱ������Ŀ�Լ��� Leader ���硢ɱ���ڵ㡢������Ⱥ����ͣ�����ڵ㣻����ʱ�����ָ������ڵ㡣��Ҫ��ҵ��ʹ�������й��ϲ��ԡ����ɲ��Դ���Ψһ���ͻỰ��������������ݡ�
 
-���ǣ���д/CAS��ԭ�������ԡ�ͬ��Ų�ͬ���ݡ����� CAS ��һ��ʤ�ߡ�Leader ��������������ѡ����Leader SIGKILL������������Ⱥ�������������ȥ�ء�ʧȥ������ʱ�ܾ��ɹ�д�롢ɾ������Ԫ���Ը��ǿ��ն����ԡ��ָ�������/��Ȩ�Ͳ���״̬�����ʡ�
+���ǣ���д/CAS��ԭ�������ԡ�ͬ��Ų�ͬ���ݡ����� CAS ��һ��ʤ�ߡ�Leader ��������������ѡ����Leader SIGKILL������������Ⱥ�������������ȥ�ء�ʧȥ������ʱ�ܾ��ɹ�д�롢ɾ������Ԫ���Ը��ǿ��ն����ԡ��ָ�������/��Ȩ�Ͳ���״̬�����ʡ�RPC ���Ի�������ʵ TCP ���á�HTTP/gRPC ����ȥ�ء������롢ȡ����ֱ�� RPC �������ơ����м�Ⱥ��֤ǰ�蹹�� bin/kvgrpc �ͻ��ˡ�
 
 ��Щ�Ƕ���һ������֤���������� Jepsen/Porcupine ��ʷ��飬Ҳ��֤�����й�����ϵ���ȷ�ԡ��洢��ע�롢��������ӳٺ���������ʱ��ѹ����֤��δʵ�֡�
 
@@ -389,7 +490,7 @@ Python ��֤��ʹ�ñ�׼�⣬ֱ��ִ�� Docker CLI�����
 
 �������������������ֵ��С��д������ʧ������������ P50/P95/P99��ͳ�ư��������ӳ١�����Ϊÿ�� worker �����������ͻỰ��������д�������ݡ����Լ��ͻỰ�������ظ����л����ӻỰ������ֻ��ǿһ�¶�Ҳ���븴����־��ѹ��ǰ���뿼���������
 
-�����Ѽ�¼��ʾ�������1000 ������8 ������128 �ֽ�ֵ��20% д�룬ʧ���� 0������Լ 244.57 ����/�룬P50 Ϊ 32.603 ms��P95 Ϊ 42.226 ms��P99 Ϊ 48.397 ms��Ӳ������Դ��������Է�Χ�� [��֤����](docs/verification.md)����Щ��ֵ��һ���Ѽ�¼�������������ܳ�ŵ��
+���� gRPC ֮ǰ�� HTTP �汾��ʷ������1000 ������8 ������128 �ֽ�ֵ��20% д�룬ʧ���� 0������Լ 244.57 ����/�룬P50 Ϊ 32.603 ms��P95 Ϊ 42.226 ms��P99 Ϊ 48.397 ms��Ӳ������Դ��������Է�Χ�� [��֤����](docs/verification.md)����Щ��ֵ��һ���Ѽ�¼�������������ܳ�ŵ��
 
 ������������ Docker ���ݲ�����Ϊ�������ݴ����������ܽ��ۡ�������������ʾ���ڵ���ϣ����������ϻ�ͬʱʧȥ�����ڵ㡣
 
@@ -398,6 +499,8 @@ Python ��֤��ʹ�ñ�׼�⣬ֱ��ִ�� Docker CLI�����
 ��ֱ�Ӽ���������İ汾����Ȩ�������ı��� [�������������](THIRD_PARTY_NOTICES.md)��
 
 - Gin��https://github.com/gin-gonic/gin ��MIT��
+- gRPC-Go��https://github.com/grpc/grpc-go ��Apache-2.0��
+- Protobuf Go��https://github.com/protocolbuffers/protobuf-go ��BSD-3-Clause��
 - HashiCorp Raft��https://github.com/hashicorp/raft ��MPL-2.0��
 - Raft bbolt �洢��https://github.com/hashicorp/raft-boltdb ��MPL-2.0��
 

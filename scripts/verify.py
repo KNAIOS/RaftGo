@@ -15,6 +15,12 @@ CLIENT = "verify-" + uuid.uuid4().hex
 KEY = CLIENT
 SEQ = 0
 TOKEN = os.environ.get("API_TOKEN", "")
+RPC_TOOL = ROOT / "bin" / ("kvgrpc.exe" if os.name == "nt" else "kvgrpc")
+NODE_IPS = {f"node{i}": f"172.30.83.{10+i}" for i in range(1, 4)}
+
+def rpc(*args):
+    assert RPC_TOOL.exists(), "build cmd/kvgrpc before running the integration test"
+    return json.loads(subprocess.check_output([str(RPC_TOOL), *args], cwd=ROOT, text=True))
 
 def docker(*args):
     return subprocess.check_output(["docker", *args], cwd=ROOT, text=True).strip()
@@ -60,6 +66,24 @@ def read(expected):
     code, result = request(leader(), "GET", "/v1/kv/" + KEY)
     assert code == 200 and result["value"] == expected and result["exists"], result
 
+def converge():
+    active = leader()
+    _, state = request(active, "GET", "/v1/status")
+    target = int(state["stats"]["commit_index"])
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        states = []
+        try:
+            for node in URLS:
+                _, current = request(node, "GET", "/v1/status", timeout=2)
+                states.append(int(current["stats"]["applied_index"]))
+            if all(index >= target for index in states):
+                return
+        except (OSError, ValueError):
+            pass
+        time.sleep(.3)
+    raise AssertionError(f"replicas did not converge to index {target}: {states}")
+
 def main():
     global SEQ
     isolated = None
@@ -70,14 +94,19 @@ def main():
     try:
         node, _, _ = write("PUT", value="a")
         read("a")
+        assert rpc("get", KEY)["value"] == "a"
         node, body, result = write("POST", "/cas", expected="a", expected_exists=True, value="b")
         assert result["applied"]
         code, duplicate = request(node, "POST", "/v1/kv/" + KEY + "/cas", body)
         assert code == 200 and duplicate == result, duplicate
+        duplicate_rpc = rpc("-client", CLIENT, "-seq", str(SEQ), "-expected", "a", "-value", "b", "cas", KEY)
+        assert duplicate_rpc == result, duplicate_rpc
         conflict = dict(body, value="bad")
         code, problem = request(node, "POST", "/v1/kv/" + KEY + "/cas", conflict)
         assert code == 409 and problem["error"] == "sequence_conflict", problem
-        print("PASS: put/get, CAS, retry dedup, sequence conflict", flush=True)
+        _, state = request(node, "GET", "/v1/status")
+        assert state["grpc_calls"] > 0
+        print("PASS: HTTP through gRPC, direct RPC, cross-transport CAS dedup, sequence conflict", flush=True)
 
         # Concurrent contenders must produce exactly one successful CAS.
         def contender(i):
@@ -100,7 +129,7 @@ def main():
         except OSError:
             pass  # Docker Desktop may make its published port unreachable.
         read("c")
-        docker("network", "connect", "--alias", isolated, network, containers[isolated])
+        docker("network", "connect", "--ip", NODE_IPS[isolated], "--alias", isolated, network, containers[isolated])
         isolated = None
         print("PASS: leader partition, majority failover, no isolated strong read", flush=True)
 
@@ -111,6 +140,7 @@ def main():
         assert replacement != old
         read("c")
         docker("compose", "start", old)
+        assert rpc("get", KEY)["value"] == "c"
         print("PASS: leader crash and majority recovery", flush=True)
 
         # Capture both data and last-request dedup, then restart the whole cluster.
@@ -120,6 +150,7 @@ def main():
         docker("compose", "restart")
         node = leader()
         read("durable")
+        assert rpc("get", KEY)["value"] == "durable"
         code, duplicate = request(node, "POST", "/v1/kv/" + KEY + "/cas", body)
         assert code == 200 and duplicate == result, duplicate
         print("PASS: snapshot, full restart, durable data and dedup", flush=True)
@@ -140,10 +171,12 @@ def main():
         write("DELETE")
         code, missing = request(leader(), "GET", "/v1/kv/" + KEY)
         assert code == 200 and not missing["exists"], missing
+        converge()
+        print("PASS: all three replicas converge after fault recovery", flush=True)
         print("PASS: no-quorum write rejection and delete", flush=True)
     finally:
         if isolated:
-            docker("network", "connect", "--alias", isolated, network, containers[isolated])
+            docker("network", "connect", "--ip", NODE_IPS[isolated], "--alias", isolated, network, containers[isolated])
         docker("compose", "start")
 
 if __name__ == "__main__":

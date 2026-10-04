@@ -1,0 +1,31 @@
+syntax = "proto3";
+
+package raftgo.kv.v1;
+option go_package = "go_prj/api/kv/v1;kvv1";
+
+// HTTP and gRPC share the same KV state machine and deduplication semantics.
+service KVService {
+  rpc Get(GetRequest) returns (Result);
+  rpc Put(MutationRequest) returns (Result);
+  rpc Delete(MutationRequest) returns (Result);
+  rpc CompareAndSwap(MutationRequest) returns (Result);
+}
+
+message GetRequest { string key = 1; }
+
+// A client must resolve the previous write before increasing its sequence.
+message MutationRequest {
+  string key = 1;
+  string value = 2;
+  string client_id = 3;
+  uint64 sequence = 4;
+  string expected = 5;
+  bool expected_exists = 6;
+}
+
+message Result {
+  string value = 1;
+  bool exists = 2;
+  bool applied = 3;
+  string error = 4;
+}

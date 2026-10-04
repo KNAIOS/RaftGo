@@ -2,7 +2,7 @@
 
 RaftGo ��Ӧ�ò��벿������������¿�Դ Go ģ�顣�����������Եİ�Ȩ������֤�����������ı��������ɣ�Ҳ������������������Ϊ����Ŀ������д��
 
-Gin �ṩ HTTP ��ܣ�HashiCorp Raft �ṩ��ʶ�㷨��raft-boltdb �ṩ��־���ȶ�״̬�洢��ģ��汾�� go.mod �� go.sum �̶������ֿⷢ��Ӧ��Դ�뼰�������ã��������������ݡ�ģ�黺���������
+Gin �ṩ HTTP ��ܣ�gRPC-Go �� Protobuf Go �ṩ RPC ����Ϣ���л���HashiCorp Raft �ṩ��ʶ�㷨��raft-boltdb �ṩ��־���ȶ�״̬�洢��ģ��汾�� go.mod �� go.sum �̶������ֿⷢ��Ӧ��Դ�뼰�������ã��������������ݡ�ģ�黺���������
 
 ���°��� go.mod �е�ֱ��������������Ȩ�������ı������� licenses/����Ӧ�汾Դ��������ṩ�ɻ�ȡ��������Դ�����޸Ļ����зַ�����Դ�롢�����ƻ��������������������֤���������Ҫ��
 
@@ -11,6 +11,9 @@ Gin �ṩ HTTP ��ܣ�HashiCorp Raft �ṩ��ʶ�㷨��raft-boltdb 
 | `github.com/gin-gonic/gin` | `v1.11.0` | [LICENSE](licenses/github.com__gin-gonic__gin@v1.11.0/LICENSE) | [��Ӧ�汾Դ��](https://proxy.golang.org/github.com/gin-gonic/gin/@v/v1.11.0.zip) |
 | `github.com/hashicorp/raft` | `v1.7.3` | [LICENSE](licenses/github.com__hashicorp__raft@v1.7.3/LICENSE) | [��Ӧ�汾Դ��](https://proxy.golang.org/github.com/hashicorp/raft/@v/v1.7.3.zip) |
 | `github.com/hashicorp/raft-boltdb/v2` | `v2.3.1` | [LICENSE](licenses/github.com__hashicorp__raft-boltdb__v2@v2.3.1/LICENSE) | [��Ӧ�汾Դ��](https://proxy.golang.org/github.com/hashicorp/raft-boltdb/v2/@v/v2.3.1.zip) |
+| `google.golang.org/genproto/googleapis/rpc` | `v0.0.0-20250707201910-8d1bb00bc6a7` | [LICENSE](licenses/google.golang.org__genproto__googleapis__rpc@v0.0.0-20250707201910-8d1bb00bc6a7/LICENSE) | [��Ӧ�汾Դ��](https://proxy.golang.org/google.golang.org/genproto/googleapis/rpc/@v/v0.0.0-20250707201910-8d1bb00bc6a7.zip) |
+| `google.golang.org/grpc` | `v1.75.1` | [LICENSE](licenses/google.golang.org__grpc@v1.75.1/LICENSE), [NOTICE.txt](licenses/google.golang.org__grpc@v1.75.1/NOTICE.txt) | [��Ӧ�汾Դ��](https://proxy.golang.org/google.golang.org/grpc/@v/v1.75.1.zip) |
+| `google.golang.org/protobuf` | `v1.36.9` | [LICENSE](licenses/google.golang.org__protobuf@v1.36.9/LICENSE) | [��Ӧ�汾Դ��](https://proxy.golang.org/google.golang.org/protobuf/@v/v1.36.9.zip) |
 | `github.com/armon/go-metrics` | `v0.4.1` | [LICENSE](licenses/github.com__armon__go-metrics@v0.4.1/LICENSE) | [��Ӧ�汾Դ��](https://proxy.golang.org/github.com/armon/go-metrics/@v/v0.4.1.zip) |
 | `github.com/boltdb/bolt` | `v1.3.1` | [LICENSE](licenses/github.com__boltdb__bolt@v1.3.1/LICENSE) | [��Ӧ�汾Դ��](https://proxy.golang.org/github.com/boltdb/bolt/@v/v1.3.1.zip) |
 | `github.com/bytedance/sonic` | `v1.14.0` | [LICENSE](licenses/github.com__bytedance__sonic@v1.14.0/LICENSE) | [��Ӧ�汾Դ��](https://proxy.golang.org/github.com/bytedance/sonic/@v/v1.14.0.zip) |
@@ -51,4 +54,3 @@ Gin �ṩ HTTP ��ܣ�HashiCorp Raft �ṩ��ʶ�㷨��raft-boltdb 
 | `golang.org/x/sys` | `v0.35.0` | [LICENSE](licenses/golang.org__x__sys@v0.35.0/LICENSE) | [��Ӧ�汾Դ��](https://proxy.golang.org/golang.org/x/sys/@v/v0.35.0.zip) |
 | `golang.org/x/text` | `v0.27.0` | [LICENSE](licenses/golang.org__x__text@v0.27.0/LICENSE) | [��Ӧ�汾Դ��](https://proxy.golang.org/golang.org/x/text/@v/v0.27.0.zip) |
 | `golang.org/x/tools` | `v0.34.0` | [LICENSE](licenses/golang.org__x__tools@v0.34.0/LICENSE) | [��Ӧ�汾Դ��](https://proxy.golang.org/golang.org/x/tools/@v/v0.34.0.zip) |
-| `google.golang.org/protobuf` | `v1.36.9` | [LICENSE](licenses/google.golang.org__protobuf@v1.36.9/LICENSE) | [��Ӧ�汾Դ��](https://proxy.golang.org/google.golang.org/protobuf/@v/v1.36.9.zip) |

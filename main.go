@@ -41,7 +41,7 @@ func main() {
 			done <- syscall.SIGTERM
 		}
 	}()
-	log.Printf("node=%s http=%s raft=%s data=%s", cfg.ID, cfg.HTTPAddr, cfg.RaftAddr, cfg.DataDir)
+	log.Printf("node=%s http=%s grpc=%s raft=%s data=%s", cfg.ID, cfg.HTTPAddr, cfg.GRPCAddr, cfg.RaftAddr, cfg.DataDir)
 	<-done
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
